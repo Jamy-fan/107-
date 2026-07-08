@@ -59,80 +59,34 @@ const DB_NAME='OurMemoriesDB';
 const DB_VERSION=1;
 const META_KEY='OurMemoriesMeta';
 
-// ====== IndexedDB ======
 function openDB(){
   return new Promise((resolve,reject)=>{
     const r=indexedDB.open(DB_NAME,DB_VERSION);
-    r.onupgradeneeded=(e)=>{
-      const db=e.target.result;
-      if(!db.objectStoreNames.contains('files'))db.createObjectStore('files',{keyPath:'id'});
-    };
-    r.onsuccess=e=>resolve(e.target.result);
-    r.onerror=e=>reject(e.target.error);
+    r.onupgradeneeded=(e)=>{const db=e.target.result;if(!db.objectStoreNames.contains('files'))db.createObjectStore('files',{keyPath:'id'});};
+    r.onsuccess=e=>resolve(e.target.result);r.onerror=e=>reject(e.target.error);
   });
 }
 
-// 保存文件Blob
-async function saveFile(id,blob){
-  const db=await openDB();
-  return new Promise((resolve,reject)=>{
-    const tx=db.transaction('files','readwrite');
-    tx.objectStore('files').put({id,blob,time:Date.now()});
-    tx.oncomplete=()=>{db.close();resolve()};
-    tx.onerror=(e)=>{db.close();reject(e.target.error)};
-  });
-}
+async function saveFile(id,blob){const db=await openDB();return new Promise((r)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put({id,blob});tx.oncomplete=()=>{db.close();r()}})}
+async function loadFile(id){const db=await openDB();return new Promise((r)=>{const tx=db.transaction('files','readonly');const req=tx.objectStore('files').get(id);req.onsuccess=()=>{db.close();r(req.result?req.result.blob:null)}})}
+async function deleteFiles(ids){const db=await openDB();return new Promise((r)=>{const tx=db.transaction('files','readwrite');const s=tx.objectStore('files');for(const id of Array.from(ids)){try{s.delete(id)}catch(e){}}tx.oncomplete=()=>{db.close();r()}})}
 
-// 读取文件Blob
-async function loadFile(id){
-  const db=await openDB();
-  return new Promise((resolve)=>{
-    const tx=db.transaction('files','readonly');
-    const r=tx.objectStore('files').get(id);
-    r.onsuccess=()=>{db.close();resolve(r.result?r.result.blob:null)};
-    r.onerror=()=>{db.close();resolve(null)};
-  });
-}
-
-// 删除文件
-async function deleteFiles(ids){
-  const db=await openDB();
-  return new Promise((resolve)=>{
-    const tx=db.transaction('files','readwrite');
-    const store=tx.objectStore('files');
-    const arr=Array.from(ids);
-    for(const id of arr){try{store.delete(id)}catch(e){}}
-    tx.oncomplete=()=>{db.close();resolve()};
-  });
-}
-
-// ====== 元数据（localStorage）======
 function saveMeta(meta){localStorage.setItem(META_KEY,JSON.stringify(meta))}
 function loadMeta(){try{return JSON.parse(localStorage.getItem(META_KEY)||'[]')}catch(e){return[]}}
-
-// 留言板
 function saveMsgs(msgs){localStorage.setItem('OurMemoriesMsgs',JSON.stringify(msgs))}
 function loadMsgs(){try{return JSON.parse(localStorage.getItem('OurMemoriesMsgs')||'[]')}catch(e){return[]}}
-
-// 信箱
-function saveLetters(letters){localStorage.setItem('OurMemoriesLetters',JSON.stringify(letters))}
+function saveLettersData(letters){localStorage.setItem('OurMemoriesLetters',JSON.stringify(letters))}
 function loadLettersData(){try{return JSON.parse(localStorage.getItem('OurMemoriesLetters')||'{"1":"","2":"","3":"","4":""}')}catch(e){return{1:'',2:'',3:'',4:''}}}
 
 const LD1=0,LD2=3500,LD3=7000,DD=10500,TD=14000;
 const ws=document.getElementById('welcomeScreen'),wl1=document.getElementById('welcomeLine1'),wl2=document.getElementById('welcomeLine2'),wl3=document.getElementById('welcomeLine3'),wd=document.getElementById('welcomeDots');
 const ls=document.getElementById('lockScreen'),lpi=document.getElementById('lockPasswordInput'),ub=document.getElementById('unlockBtn'),le=document.getElementById('lockError');
 setTimeout(()=>wl1.classList.add('show'),LD1);setTimeout(()=>wl2.classList.add('show'),LD2);setTimeout(()=>wl3.classList.add('show'),LD3);setTimeout(()=>wd.classList.add('show'),DD);setTimeout(()=>{ws.classList.add('hidden');ls.classList.remove('hidden');lpi.focus()},TD);
-
 function tryUnlock(){if(lpi.value.trim()===SITE_PASSWORD){ls.classList.add('hidden');initApp()}else{le.classList.add('show');lpi.value='';lpi.focus();setTimeout(()=>le.classList.remove('show'),1500)}}
 ub.addEventListener('click',tryUnlock);lpi.addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock()});
 
 async function initApp(){
-  // ====== 加载数据 ======
-  let mediaMeta=loadMeta();
-  let messages=loadMsgs();
-  let letters=loadLettersData();
-  console.log('✅ 已加载:',mediaMeta.length,'个媒体文件,',messages.length,'条留言');
-
+  let mediaMeta=loadMeta(),messages=loadMsgs(),letters=loadLettersData();
   let selectedItems=new Set(),isSelectMode=false,currentFilter='photos',currentEditItemId=null;
   const gridPhotos=document.getElementById('mediaGridPhotos'),gridVideos=document.getElementById('mediaGridVideos');
   const fileInput=document.getElementById('fileInput'),tabPhotos=document.getElementById('tabPhotos'),tabVideos=document.getElementById('tabVideos');
@@ -151,69 +105,26 @@ async function initApp(){
   function isVideoFile(file){return file.type.startsWith('video/')||file.name.match(/\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v|3gp|ts|mts|m2ts)$/i)}
   function esc(t){return String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m])}
 
-  // 获取媒体URL
-  async function getMediaURL(id){
-    if(urlCache.has(id))return urlCache.get(id);
-    const blob=await loadFile(id);
-    if(blob){const url=URL.createObjectURL(blob);urlCache.set(id,url);return url}
-    return '';
-  }
+  async function getMediaURL(id){if(urlCache.has(id))return urlCache.get(id);const blob=await loadFile(id);if(blob){const url=URL.createObjectURL(blob);urlCache.set(id,url);return url}return '';}
 
   async function buildPhotosHTML(){
-    const items=getItems('photos');
-    if(!items.length){gridPhotos.innerHTML='<div class="empty-state"><i class="far fa-images" style="font-size:2rem;display:block;margin-bottom:0.5rem;"></i>暂无照片</div>';return}
-    let h='';
-    for(const item of items){
-      const url=await getMediaURL(item.id);
-      const tc=item.text||'',tl=typeLabel(item),ti=typeIcon(item),sel=selectedItems.has(item.id),smc=isSelectMode?' select-mode':'',sc=sel?' selected':'';
-      h+=`<div class="media-card${smc}${sc}" data-id="${item.id}"><div class="select-checkbox"><i class="fas fa-check"></i></div><div class="media-container"><img src="${url}" alt="${esc(item.title)}" loading="lazy"></div><div class="media-text-below ${tc?'':'empty'}">${tc?esc(tc):'点击编辑'}</div><div class="card-footer"><span class="media-title"><i class="fas ${ti}"></i> ${esc(item.title)||'媒体'}<span class="media-type-badge">${tl}</span></span><div class="action-btns"><button class="icon-btn text-edit-btn" title="编辑"><i class="fas fa-pen"></i></button><button class="icon-btn preview-btn" title="查看"><i class="fas fa-search-plus"></i></button><button class="icon-btn single-delete-btn" title="删除"><i class="fas fa-trash-alt"></i></button></div></div></div>`;
-    }
-    gridPhotos.innerHTML=h;
+    const items=getItems('photos');if(!items.length){gridPhotos.innerHTML='<div class="empty-state"><i class="far fa-images" style="font-size:2rem;display:block;margin-bottom:0.5rem;"></i>暂无照片</div>';return}
+    let h='';for(const item of items){const url=await getMediaURL(item.id);const tc=item.text||'',tl=typeLabel(item),ti=typeIcon(item),sel=selectedItems.has(item.id),smc=isSelectMode?' select-mode':'',sc=sel?' selected':'';h+=`<div class="media-card${smc}${sc}" data-id="${item.id}"><div class="select-checkbox"><i class="fas fa-check"></i></div><div class="media-container"><img src="${url}" alt="${esc(item.title)}" loading="lazy"></div><div class="media-text-below ${tc?'':'empty'}">${tc?esc(tc):'点击编辑'}</div><div class="card-footer"><span class="media-title"><i class="fas ${ti}"></i> ${esc(item.title)||'媒体'}<span class="media-type-badge">${tl}</span></span><div class="action-btns"><button class="icon-btn text-edit-btn" title="编辑"><i class="fas fa-pen"></i></button><button class="icon-btn preview-btn" title="查看"><i class="fas fa-search-plus"></i></button><button class="icon-btn single-delete-btn" title="删除"><i class="fas fa-trash-alt"></i></button></div></div></div>`;}gridPhotos.innerHTML=h;
   }
 
   async function buildVideosHTML(){
-    const items=getItems('videos');
-    if(!items.length){gridVideos.innerHTML='<div class="empty-state"><i class="fas fa-video" style="font-size:2rem;display:block;margin-bottom:0.5rem;"></i>暂无视频</div>';return}
-    let h='';
-    for(const item of items){
-      const url=await getMediaURL(item.id);
-      const tc=item.text||'',tl=typeLabel(item),ti=typeIcon(item),sel=selectedItems.has(item.id),smc=isSelectMode?' select-mode':'',sc=sel?' selected':'';
-      h+=`<div class="media-card${smc}${sc}" data-id="${item.id}"><div class="select-checkbox"><i class="fas fa-check"></i></div><div class="media-container"><video src="${url}" loop preload="metadata" playsinline muted></video><div class="play-icon"><i class="fas fa-play"></i></div></div><div class="media-text-below ${tc?'':'empty'}">${tc?esc(tc):'点击编辑'}</div><div class="card-footer"><span class="media-title"><i class="fas ${ti}"></i> ${esc(item.title)||'视频'}<span class="media-type-badge">${tl}</span></span><div class="action-btns"><button class="icon-btn text-edit-btn" title="编辑"><i class="fas fa-pen"></i></button><button class="icon-btn preview-btn" title="查看"><i class="fas fa-expand"></i></button><button class="icon-btn single-delete-btn" title="删除"><i class="fas fa-trash-alt"></i></button></div></div></div>`;
-    }
-    gridVideos.innerHTML=h;
+    const items=getItems('videos');if(!items.length){gridVideos.innerHTML='<div class="empty-state"><i class="fas fa-video" style="font-size:2rem;display:block;margin-bottom:0.5rem;"></i>暂无视频</div>';return}
+    let h='';for(const item of items){const url=await getMediaURL(item.id);const tc=item.text||'',tl=typeLabel(item),ti=typeIcon(item),sel=selectedItems.has(item.id),smc=isSelectMode?' select-mode':'',sc=sel?' selected':'';h+=`<div class="media-card${smc}${sc}" data-id="${item.id}"><div class="select-checkbox"><i class="fas fa-check"></i></div><div class="media-container"><video src="${url}" loop preload="metadata" playsinline muted></video><div class="play-icon"><i class="fas fa-play"></i></div></div><div class="media-text-below ${tc?'':'empty'}">${tc?esc(tc):'点击编辑'}</div><div class="card-footer"><span class="media-title"><i class="fas ${ti}"></i> ${esc(item.title)||'视频'}<span class="media-type-badge">${tl}</span></span><div class="action-btns"><button class="icon-btn text-edit-btn" title="编辑"><i class="fas fa-pen"></i></button><button class="icon-btn preview-btn" title="查看"><i class="fas fa-expand"></i></button><button class="icon-btn single-delete-btn" title="删除"><i class="fas fa-trash-alt"></i></button></div></div></div>`;}gridVideos.innerHTML=h;
   }
 
   async function renderBoth(){await buildPhotosHTML();await buildVideosHTML()}
+  function scheduleRender(){if(renderPending)return;renderPending=true;requestAnimationFrame(async ()=>{await renderBoth();renderPending=false})}
 
-  function scheduleRender(){
-    if(renderPending)return;
-    renderPending=true;
-    requestAnimationFrame(async ()=>{await renderBoth();renderPending=false});
-  }
-
-  function switchTab(filter){
-    if(currentFilter===filter)return;currentFilter=filter;
-    if(filter==='photos'){tabPhotos.classList.add('active');tabVideos.classList.remove('active');gridPhotos.classList.add('active');gridVideos.classList.remove('active')}
-    else{tabVideos.classList.add('active');tabPhotos.classList.remove('active');gridVideos.classList.add('active');gridPhotos.classList.remove('active')}
-  }
+  function switchTab(filter){if(currentFilter===filter)return;currentFilter=filter;if(filter==='photos'){tabPhotos.classList.add('active');tabVideos.classList.remove('active');gridPhotos.classList.add('active');gridVideos.classList.remove('active')}else{tabVideos.classList.add('active');tabPhotos.classList.remove('active');gridVideos.classList.add('active');gridPhotos.classList.remove('active')}}
   tabPhotos.addEventListener('click',()=>switchTab('photos'));tabVideos.addEventListener('click',()=>switchTab('videos'));
 
-  // 查看器
-  async function openMediaViewer(item){
-    currentViewerItems=getItems(item.type==='image'?'photos':'videos');
-    currentViewerIndex=currentViewerItems.findIndex(i=>i.id===item.id);
-    if(currentViewerIndex===-1)currentViewerIndex=0;
-    await updateViewerContent();mediaViewer.classList.add('active');document.body.style.overflow='hidden';
-  }
-  async function updateViewerContent(){
-    if(!currentViewerItems.length)return;
-    const item=currentViewerItems[currentViewerIndex];
-    const url=await getMediaURL(item.id);
-    viewerContent.innerHTML='';viewerTitle.textContent=item.title||'';viewerCounter.textContent=`${currentViewerIndex+1} / ${currentViewerItems.length}`;
-    viewerPrev.style.display=currentViewerItems.length>1?'flex':'none';viewerNext.style.display=currentViewerItems.length>1?'flex':'none';
-    if(item.type==='image')viewerContent.innerHTML=`<img src="${url}" alt="${esc(item.title)}">`;
-    else{viewerContent.innerHTML=`<video src="${url}" controls autoplay playsinline style="max-width:100%;max-height:85vh;border-radius:0.3rem;"></video>`;currentVideoElement=viewerContent.querySelector('video')}
-  }
+  async function openMediaViewer(item){currentViewerItems=getItems(item.type==='image'?'photos':'videos');currentViewerIndex=currentViewerItems.findIndex(i=>i.id===item.id);if(currentViewerIndex===-1)currentViewerIndex=0;await updateViewerContent();mediaViewer.classList.add('active');document.body.style.overflow='hidden';}
+  async function updateViewerContent(){if(!currentViewerItems.length)return;const item=currentViewerItems[currentViewerIndex];const url=await getMediaURL(item.id);viewerContent.innerHTML='';viewerTitle.textContent=item.title||'';viewerCounter.textContent=`${currentViewerIndex+1} / ${currentViewerItems.length}`;viewerPrev.style.display=currentViewerItems.length>1?'flex':'none';viewerNext.style.display=currentViewerItems.length>1?'flex':'none';if(item.type==='image')viewerContent.innerHTML=`<img src="${url}" alt="${esc(item.title)}">`;else{viewerContent.innerHTML=`<video src="${url}" controls autoplay playsinline style="max-width:100%;max-height:85vh;border-radius:0.3rem;"></video>`;currentVideoElement=viewerContent.querySelector('video')}}
   function closeMediaViewer(){if(currentVideoElement){currentVideoElement.pause();currentVideoElement=null}mediaViewer.classList.remove('active');document.body.style.overflow=''}
   function viewerPrevMedia(){if(!currentViewerItems.length)return;if(currentVideoElement){currentVideoElement.pause();currentVideoElement=null}currentViewerIndex=(currentViewerIndex-1+currentViewerItems.length)%currentViewerItems.length;updateViewerContent()}
   function viewerNextMedia(){if(!currentViewerItems.length)return;if(currentVideoElement){currentVideoElement.pause();currentVideoElement=null}currentViewerIndex=(currentViewerIndex+1)%currentViewerItems.length;updateViewerContent()}
@@ -221,55 +132,18 @@ async function initApp(){
   let tsx=0;mediaViewer.addEventListener('touchstart',e=>{tsx=e.touches[0].clientX},{passive:true});mediaViewer.addEventListener('touchend',e=>{const d=e.changedTouches[0].clientX-tsx;if(Math.abs(d)>35){if(d>0)viewerPrevMedia();else viewerNextMedia();}});
   document.addEventListener('keydown',e=>{if(!mediaViewer.classList.contains('active'))return;if(e.key==='Escape')closeMediaViewer();if(e.key==='ArrowLeft')viewerPrevMedia();if(e.key==='ArrowRight')viewerNextMedia()});
 
-  // 删除
-  async function deleteSingleItem(itemId){
-    const idx=mediaMeta.findIndex(m=>m.id===itemId);if(idx===-1)return;
-    const [del]=mediaMeta.splice(idx,1);saveMeta(mediaMeta);
-    await deleteFiles(new Set([itemId]));
-    if(urlCache.has(itemId)){URL.revokeObjectURL(urlCache.get(itemId));urlCache.delete(itemId)}
-    const card=document.querySelector(`.media-card[data-id="${itemId}"]`);
-    if(card){card.style.opacity='0';card.style.transform='scale(0.8)';setTimeout(()=>{if(card.parentNode)card.parentNode.removeChild(card)},150)}
-    showToast('✅ 已删除',true);
-  }
+  async function deleteSingleItem(itemId){const idx=mediaMeta.findIndex(m=>m.id===itemId);if(idx===-1)return;mediaMeta.splice(idx,1);saveMeta(mediaMeta);await deleteFiles(new Set([itemId]));if(urlCache.has(itemId)){URL.revokeObjectURL(urlCache.get(itemId));urlCache.delete(itemId)}const card=document.querySelector(`.media-card[data-id="${itemId}"]`);if(card){card.style.opacity='0';card.style.transform='scale(0.8)';setTimeout(()=>{if(card.parentNode)card.parentNode.removeChild(card)},150)}showToast('✅ 已删除',true);}
 
-  function toggleSelectMode(){
-    isSelectMode=!isSelectMode;selectedItems.clear();
-    if(isSelectMode){batchDeleteBtn.classList.add('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 选择中...';confirmDeleteBtn.classList.add('show');cancelSelectBtn.classList.add('show');selectAllBtn.classList.add('show')}
-    else{batchDeleteBtn.classList.remove('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 批量删除';confirmDeleteBtn.classList.remove('show');cancelSelectBtn.classList.remove('show');selectAllBtn.classList.remove('show')}
-    updateCount();updateSelectAllButton();scheduleRender();
-  }
+  function toggleSelectMode(){isSelectMode=!isSelectMode;selectedItems.clear();if(isSelectMode){batchDeleteBtn.classList.add('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 选择中...';confirmDeleteBtn.classList.add('show');cancelSelectBtn.classList.add('show');selectAllBtn.classList.add('show')}else{batchDeleteBtn.classList.remove('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 批量删除';confirmDeleteBtn.classList.remove('show');cancelSelectBtn.classList.remove('show');selectAllBtn.classList.remove('show')}updateCount();updateSelectAllButton();scheduleRender()}
   function cancelSelectMode(){if(!isSelectMode)return;isSelectMode=false;selectedItems.clear();batchDeleteBtn.classList.remove('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 批量删除';confirmDeleteBtn.classList.remove('show');cancelSelectBtn.classList.remove('show');selectAllBtn.classList.remove('show');updateCount();scheduleRender()}
-  function selectAllItems(){
-    if(!isSelectMode)return;const items=getItems(currentFilter);
-    if(selectedItems.size===items.length)selectedItems.clear();else items.forEach(i=>selectedItems.add(i.id));
-    updateCount();updateSelectAllButton();
-    document.querySelectorAll('.media-grid.active .media-card').forEach(c=>{const id=c.dataset.id;if(id){if(selectedItems.has(id))c.classList.add('selected');else c.classList.remove('selected')}})
-  }
+  function selectAllItems(){if(!isSelectMode)return;const items=getItems(currentFilter);if(selectedItems.size===items.length)selectedItems.clear();else items.forEach(i=>selectedItems.add(i.id));updateCount();updateSelectAllButton();document.querySelectorAll('.media-grid.active .media-card').forEach(c=>{const id=c.dataset.id;if(id){if(selectedItems.has(id))c.classList.add('selected');else c.classList.remove('selected')}})}
   function updateSelectAllButton(){if(!isSelectMode)return;const items=getItems(currentFilter);selectAllBtn.innerHTML=selectedItems.size===items.length&&items.length>0?'<i class="fas fa-square"></i> 取消全选':'<i class="fas fa-check-double"></i> 全选'}
-  async function confirmDeleteSelected(){
-    if(!selectedItems.size)return;const ds=new Set(selectedItems);
-    mediaMeta=mediaMeta.filter(i=>!ds.has(i.id));saveMeta(mediaMeta);
-    await deleteFiles(ds);
-    for(const id of ds){if(urlCache.has(id)){URL.revokeObjectURL(urlCache.get(id));urlCache.delete(id)}}
-    selectedItems.clear();isSelectMode=false;batchDeleteBtn.classList.remove('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 批量删除';confirmDeleteBtn.classList.remove('show');cancelSelectBtn.classList.remove('show');selectAllBtn.classList.remove('show');
-    updateCount();scheduleRender();showToast(`✅ 已删除 ${ds.size} 个`,true);
-  }
+  async function confirmDeleteSelected(){if(!selectedItems.size)return;const ds=new Set(selectedItems);mediaMeta=mediaMeta.filter(i=>!ds.has(i.id));saveMeta(mediaMeta);await deleteFiles(ds);for(const id of ds){if(urlCache.has(id)){URL.revokeObjectURL(urlCache.get(id));urlCache.delete(id)}}selectedItems.clear();isSelectMode=false;batchDeleteBtn.classList.remove('active');batchDeleteBtn.innerHTML='<i class="fas fa-check-square"></i> 批量删除';confirmDeleteBtn.classList.remove('show');cancelSelectBtn.classList.remove('show');selectAllBtn.classList.remove('show');updateCount();scheduleRender();showToast(`✅ 已删除 ${ds.size} 个`,true)}
   function toggleItemSelection(id){if(!isSelectMode)return;if(selectedItems.has(id))selectedItems.delete(id);else selectedItems.add(id);updateCount();updateSelectAllButton();const card=document.querySelector(`.media-card[data-id="${id}"]`);if(card){if(selectedItems.has(id))card.classList.add('selected');else card.classList.remove('selected')}}
   function updateCount(){selectedCountSpan.textContent=selectedItems.size}
 
-  function handleGridClick(e){
-    const t=e.target;
-    if(t.closest('.single-delete-btn')){e.stopPropagation();e.preventDefault();const card=t.closest('.media-card');if(card&&card.dataset.id)deleteSingleItem(card.dataset.id);return}
-    const card=t.closest('.media-card');if(!card)return;const id=card.dataset.id,item=mediaMeta.find(m=>m.id==id);if(!item)return;
-    if(isSelectMode){if(!t.closest('button')||t.closest('.play-icon')||t.closest('video')){toggleItemSelection(id)}return}
-    if(t.closest('.text-edit-btn')){openTextEditor(item);return}
-    if(t.closest('.preview-btn')){openMediaViewer(item);return}
-    if(t.closest('.play-icon')||t.closest('video')){handleVideo(card);return}
-    if(t.closest('.media-text-below')){openTextEditor(item);return}
-    if(t.closest('.media-container')){if(item.type==='image')openMediaViewer(item);else handleVideo(card);return}
-  }
+  function handleGridClick(e){const t=e.target;if(t.closest('.single-delete-btn')){e.stopPropagation();e.preventDefault();const card=t.closest('.media-card');if(card&&card.dataset.id)deleteSingleItem(card.dataset.id);return}const card=t.closest('.media-card');if(!card)return;const id=card.dataset.id,item=mediaMeta.find(m=>m.id==id);if(!item)return;if(isSelectMode){if(!t.closest('button')||t.closest('.play-icon')||t.closest('video')){toggleItemSelection(id)}return}if(t.closest('.text-edit-btn')){openTextEditor(item);return}if(t.closest('.preview-btn')){openMediaViewer(item);return}if(t.closest('.play-icon')||t.closest('video')){handleVideo(card);return}if(t.closest('.media-text-below')){openTextEditor(item);return}if(t.closest('.media-container')){if(item.type==='image')openMediaViewer(item);else handleVideo(card);return}}
   gridPhotos.addEventListener('click',handleGridClick);gridVideos.addEventListener('click',handleGridClick);
-
   function handleVideo(card){const v=card.querySelector('video'),p=card.querySelector('.play-icon');if(!v||!p)return;if(v.paused){v.muted=false;v.play().catch(()=>{v.muted=true;v.play()});p.classList.add('playing');p.querySelector('i').className='fas fa-pause'}else{v.pause();p.classList.remove('playing');p.querySelector('i').className='fas fa-play'}}
 
   function openTextEditor(item){if(isSelectMode)return;currentEditItemId=item.id;mediaTextInput.value=item.text||'';textModal.classList.add('active');mediaTextInput.focus()}
@@ -277,55 +151,26 @@ async function initApp(){
   saveTextBtn.addEventListener('click',()=>{closeTextModal();showToast('✅ 已保存')});cancelTextBtn.addEventListener('click',()=>{textModal.classList.remove('active');currentEditItemId=null});textModal.addEventListener('click',e=>{if(e.target===textModal)closeTextModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&textModal.classList.contains('active'))closeTextModal()});
   batchDeleteBtn.addEventListener('click',toggleSelectMode);confirmDeleteBtn.addEventListener('click',confirmDeleteSelected);cancelSelectBtn.addEventListener('click',cancelSelectMode);selectAllBtn.addEventListener('click',selectAllItems);
 
-  // ====== 上传文件 ======
-  fileInput.addEventListener('change',async e=>{
-    const files=Array.from(e.target.files);if(!files.length)return;
-    const total=files.length;let processed=0;
-    progressBarWrap.classList.add('show');uploadStatus.classList.add('show');
-    progressBarFill.style.width='0%';uploadStatus.textContent=`0 / ${total}`;
-    
-    for(const file of files){
-      if(!file.type.startsWith('image/')&&!file.type.startsWith('video/')&&!file.name.match(/\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v|3gp|ts|mts|m2ts)$/i)){processed++;continue}
-      const id=Date.now()+Math.random().toString(36);
-      const type=isVideoFile(file)?'video':'image';
-      // 保存Blob到IndexedDB
-      await saveFile(id,file);
-      // 保存元数据到localStorage
-      mediaMeta.push({id,type,title:file.name.replace(/\.[^/.]+$/,"").substring(0,25),text:''});
-      saveMeta(mediaMeta);
-      processed++;
-      progressBarFill.style.width=Math.round((processed/total)*100)+'%';
-      uploadStatus.textContent=`${processed} / ${total}`;
-      await new Promise(r=>setTimeout(r,0));
-    }
-    progressBarWrap.classList.remove('show');uploadStatus.classList.remove('show');
-    scheduleRender();showToast(`✅ 已永久保存`);fileInput.value='';
-  });
+  fileInput.addEventListener('change',async e=>{const files=Array.from(e.target.files);if(!files.length)return;const total=files.length;let processed=0;progressBarWrap.classList.add('show');uploadStatus.classList.add('show');progressBarFill.style.width='0%';uploadStatus.textContent=`0 / ${total}`;for(const file of files){if(!file.type.startsWith('image/')&&!file.type.startsWith('video/')&&!file.name.match(/\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v|3gp|ts|mts|m2ts)$/i)){processed++;continue}const id=Date.now()+Math.random().toString(36);await saveFile(id,file);mediaMeta.push({id,type:isVideoFile(file)?'video':'image',title:file.name.replace(/\.[^/.]+$/,"").substring(0,25),text:''});saveMeta(mediaMeta);processed++;progressBarFill.style.width=Math.round((processed/total)*100)+'%';uploadStatus.textContent=`${processed} / ${total}`;await new Promise(r=>setTimeout(r,0));}progressBarWrap.classList.remove('show');uploadStatus.classList.remove('show');scheduleRender();showToast('✅ 已永久保存');fileInput.value='';});
 
-  // 导航
   const navGallery=document.getElementById('navGallery'),navMessage=document.getElementById('navMessage'),navMailbox=document.getElementById('navMailbox'),pageGallery=document.getElementById('pageGallery'),pageMessage=document.getElementById('pageMessage'),pageMailbox=document.getElementById('pageMailbox');
   function switchPage(an,ap){if(isSelectMode)cancelSelectMode();[navGallery,navMessage,navMailbox].forEach(n=>n.classList.remove('active'));[pageGallery,pageMessage,pageMailbox].forEach(p=>p.classList.remove('active'));an.classList.add('active');ap.classList.add('active')}
   navGallery.addEventListener('click',()=>switchPage(navGallery,pageGallery));navMessage.addEventListener('click',()=>switchPage(navMessage,pageMessage));navMailbox.addEventListener('click',()=>switchPage(navMailbox,pageMailbox));
 
-  // 留言板
   const mci=document.getElementById('messageContentInput'),msb=document.getElementById('messageSubmitBtn'),ml=document.getElementById('messageList'),mc=document.getElementById('messageCount');
   function ft(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`}
-  function renderMessages(){
-    if(!messages.length){ml.innerHTML='<div class="message-empty"><i class="fas fa-comments"></i><p>还没有留言，来说点什么吧~</p></div>';updateMsgCount();return}
-    let h='';for(let i=0;i<messages.length;i++){const msg=messages[i],rc=msg.replies?msg.replies.length:0;h+=`<div class="message-item"><div class="message-header"><span class="message-time"><i class="far fa-clock"></i> ${msg.time}</span><div class="message-actions"><button class="message-reply-btn" data-action="r" data-index="${i}"><i class="fas fa-reply"></i> 回复${rc>0?`<span class="reply-count-badge">${rc}</span>`:''}</button><button class="message-delete-btn" data-action="dm" data-index="${i}"><i class="fas fa-times"></i></button></div></div><div class="message-content">${esc(msg.content)}</div>${renderReplies(msg,i)}</div>`}ml.innerHTML=h;updateMsgCount()}
+  function renderMessages(){if(!messages.length){ml.innerHTML='<div class="message-empty"><i class="fas fa-comments"></i><p>还没有留言，来说点什么吧~</p></div>';updateMsgCount();return}let h='';for(let i=0;i<messages.length;i++){const msg=messages[i],rc=msg.replies?msg.replies.length:0;h+=`<div class="message-item"><div class="message-header"><span class="message-time"><i class="far fa-clock"></i> ${msg.time}</span><div class="message-actions"><button class="message-reply-btn" data-action="r" data-index="${i}"><i class="fas fa-reply"></i> 回复${rc>0?`<span class="reply-count-badge">${rc}</span>`:''}</button><button class="message-delete-btn" data-action="dm" data-index="${i}"><i class="fas fa-times"></i></button></div></div><div class="message-content">${esc(msg.content)}</div>${renderReplies(msg,i)}</div>`}ml.innerHTML=h;updateMsgCount()}
   function renderReplies(msg,mi){if(!msg.replies||!msg.replies.length)return'';let h='';for(let ri=0;ri<msg.replies.length;ri++){const r=msg.replies[ri];h+=`<div class="reply-item"><div class="reply-header"><span class="reply-time"><i class="far fa-clock"></i> ${r.time}</span><button class="reply-delete-btn" data-action="dr" data-mi="${mi}" data-ri="${ri}"><i class="fas fa-times"></i></button></div><div class="reply-content">${esc(r.content)}</div></div>`}return h}
   ml.onclick=function(e){const a=e.target.closest('[data-action]');if(!a)return;const at=a.dataset.action;if(at==='r'){toggleReplyInput(parseInt(a.dataset.index))}else if(at==='dm'){messages.splice(parseInt(a.dataset.index),1);saveMsgs(messages);renderMessages();showToast('✅ 已删除',true)}else if(at==='dr'){const mi=parseInt(a.dataset.mi),ri=parseInt(a.dataset.ri);messages[mi].replies.splice(ri,1);saveMsgs(messages);renderMessages();showToast('✅ 已删除',true)}else if(at==='sr'){const mi=parseInt(a.dataset.mi),input=document.getElementById('ri-'+mi);if(input){const rc=input.value.trim();if(!rc){input.focus();return}if(!messages[mi].replies)messages[mi].replies=[];messages[mi].replies.push({content:rc,time:ft()});saveMsgs(messages);renderMessages();showToast('✅ 回复已保存')}}};
   function toggleReplyInput(mi){const s=ml.querySelector(`[data-mi="${mi}"]`)?.closest('.message-item')?.querySelector('.replies-section');if(!s)return;const ex=document.getElementById('ria-'+mi);if(ex){ex.remove();return}const ia=document.createElement('div');ia.className='reply-input-area';ia.id='ria-'+mi;ia.innerHTML=`<input type="text" class="reply-input" id="ri-${mi}" placeholder="输入回复..." maxlength="300"><button class="reply-send-btn" data-action="sr" data-mi="${mi}"><i class="fas fa-paper-plane"></i></button>`;s.appendChild(ia);document.getElementById('ri-'+mi).focus()}
   function updateMsgCount(){let tr=0;messages.forEach(m=>{if(m.replies)tr+=m.replies.length});mc.textContent=`共 ${messages.length} 条留言，${tr} 条回复`}
   msb.addEventListener('click',()=>{const c=mci.value.trim();if(!c){mci.focus();return}messages.unshift({content:c,time:ft(),replies:[]});saveMsgs(messages);mci.value='';renderMessages();showToast('✅ 留言已永久保存')});mci.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.ctrlKey)msb.click()});
 
-  // 信箱
   const mbp={1:'1123',2:'lovemyselfforever',3:'1802',4:'107'};function encrypt(t,p){if(!t)return'';let r='';const k=p.split('').reduce((a,c)=>a+c.charCodeAt(0),0);for(let i=0;i<t.length;i++)r+=String.fromCharCode(t.charCodeAt(i)^(k+i)%65536);return btoa(unescape(encodeURIComponent(r)))}function decrypt(e,p){if(!e)return'';try{const d=decodeURIComponent(escape(atob(e)));const k=p.split('').reduce((a,c)=>a+c.charCodeAt(0),0);let r='';for(let i=0;i<d.length;i++)r+=String.fromCharCode(d.charCodeAt(i)^(k+i)%65536);return r}catch(e){return''}}
   const pm=document.getElementById('passwordModal'),pi=document.getElementById('passwordInput'),cpb=document.getElementById('confirmPasswordBtn'),cancb=document.getElementById('cancelPasswordBtn'),lm=document.getElementById('letterModal'),lti=document.getElementById('letterTextInput'),slb=document.getElementById('saveLetterBtn'),clb=document.getElementById('cancelLetterBtn');let cmi=null;
   function updateLD(){for(let i=1;i<=4;i++){const el=document.getElementById('letterContent'+i);if(el){el.textContent=letters[i]?'📝 信件已加密存储':'🔒 输入密码查看信件';el.classList.add('encrypted')}}}
-  window.openLetter=function(id){cmi=id;pi.value='';pm.classList.add('active');pi.focus()};cpb.addEventListener('click',()=>{const e=pi.value.trim();if(e===mbp[cmi]){pm.classList.remove('active');lti.value=letters[cmi]?decrypt(letters[cmi],mbp[cmi]):'';lm.classList.add('active');lti.focus()}else alert('密码错误')});cancb.addEventListener('click',()=>pm.classList.remove('active'));pm.addEventListener('click',e=>{if(e.target===pm)pm.classList.remove('active')});slb.addEventListener('click',()=>{if(cmi){letters[cmi]=lti.value?encrypt(lti.value,mbp[cmi]):'';saveLetters(letters);updateLD();showToast('✅ 信件已永久保存')}lm.classList.remove('active');cmi=null});clb.addEventListener('click',()=>{lm.classList.remove('active');cmi=null});lm.addEventListener('click',e=>{if(e.target===lm){lm.classList.remove('active');cmi=null}});document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(pm.classList.contains('active'))pm.classList.remove('active');if(lm.classList.contains('active')){lm.classList.remove('active');cmi=null}}});
+  window.openLetter=function(id){cmi=id;pi.value='';pm.classList.add('active');pi.focus()};cpb.addEventListener('click',()=>{const e=pi.value.trim();if(e===mbp[cmi]){pm.classList.remove('active');lti.value=letters[cmi]?decrypt(letters[cmi],mbp[cmi]):'';lm.classList.add('active');lti.focus()}else alert('密码错误')});cancb.addEventListener('click',()=>pm.classList.remove('active'));pm.addEventListener('click',e=>{if(e.target===pm)pm.classList.remove('active')});slb.addEventListener('click',()=>{if(cmi){letters[cmi]=lti.value?encrypt(lti.value,mbp[cmi]):'';saveLettersData(letters);updateLD();showToast('✅ 信件已永久保存')}lm.classList.remove('active');cmi=null});clb.addEventListener('click',()=>{lm.classList.remove('active');cmi=null});lm.addEventListener('click',e=>{if(e.target===lm){lm.classList.remove('active');cmi=null}});document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(pm.classList.contains('active'))pm.classList.remove('active');if(lm.classList.contains('active')){lm.classList.remove('active');cmi=null}}});
 
-  // 初始化渲染
   scheduleRender();renderMessages();updateLD();
 }
 })();
